@@ -28,9 +28,9 @@ class AddressObjectAdmin(admin.ModelAdmin):
 
 @admin.register(AddressGroup)
 class AddressGroupAdmin(admin.ModelAdmin):
-    fields = ('name', 'members')
+    fields = ('name','device', 'members')
     search_fields = ['name']
-    list_display = ('name', 'get_members' )
+    list_display = ('name', 'device', 'get_members' )
 
     def get_members(self, obj):
         return ", ".join([mem.name for mem in obj.members.all()])
@@ -43,9 +43,9 @@ class ServiceObjectAdmin(admin.ModelAdmin):
 
 @admin.register(ServiceGroup)
 class ServiceGrouptAdmin(admin.ModelAdmin):
-    fields = ('name', 'members')
+    fields = ('name', 'device', 'members')
     search_fields = ['name']
-    list_display = ('name', 'get_members' )
+    list_display = ('name', 'device', 'get_members' )
 
     def get_members(self, obj):
         return ", ".join([mem.name for mem in obj.members.all()])

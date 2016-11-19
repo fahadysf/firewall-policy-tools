@@ -17,6 +17,7 @@ from django.core.management.base import BaseCommand, CommandError
 from normalized_fw_config.models import AddressObject, \
     Device, \
     Policy, \
+    CompoundServiceObject, \
     RawConfigFile, \
     ConfigVersion, \
     AddressGroup, \
@@ -87,7 +88,7 @@ def populate_addrgrpobjects(dev, addrgrpdict, options):
         for m in members:
             m = m.strip('"')
             try:
-                addrobj = AddressObject.objects.get(name=m)
+                addrobj = AddressObject.objects.get(name=m, device=dev)
                 addrgrpobject.members.add(addrobj)
             except:
                 raise
@@ -111,8 +112,7 @@ def populate_serviceobjects(dev, serviceobjdict, options):
 
         try:
             #Make compund service object if there are multiple portranges in the service
-            compserv, created = ServiceGroup.objects.get_or_create(name=objname, device=dev)
-            compserv.compound = True
+            compserv, created = CompoundServiceObject.objects.get_or_create(name=objname, device=dev)
             if 'comment' in obj.keys():
                 compserv.description = obj['comment']
             for k in objkeys:
@@ -203,28 +203,29 @@ def populate_serviceobjects(dev, serviceobjdict, options):
             print(str(obj))
             raise
 
-def populate_servicegroupobjects(dev, addrgrpdict, options):
-    for objname in addrgrpdict.keys():
+def populate_servicegroupobjects(dev, servicegroupdict, options):
+    for objname in servicegroupdict.keys():
         """
         Create the Address Group Objects
         """
-        addrgrpobject, created = AddressGroup.objects.get_or_create(name=objname, device=dev)
-        obj = addrgrpdict[objname]
-        addrgrpobject.name = objname
-        addrgrpobject.device = dev
+        servicegroupobject, created = ServiceGroup.objects.get_or_create(name=objname, device=dev)
+        obj = servicegroupdict[objname]
+        servicegroupobject.name = objname
+        servicegroupobject.device = dev
+        servicegroupobject.compoundservice = False
         members = obj['member'].split(" ")
         for m in members:
             m = m.strip('"')
             try:
-                addrobj = AddressObject.objects.get(name=m)
-                addrgrpobject.members.add(addrobj)
+                servicegroup = CompoundServiceObject.objects.get(name=m, device=dev)
+                servicegroupobject.members.add(servicegroup)
             except:
                 raise
         if options['d'] == 'n':
-            addrgrpobject.save()
+            servicegroupobject.save()
         else:
             print("Object not saved")
-            addrgrpobject.delete()
+            servicegroupobject.delete()
 
 class Command(BaseCommand):
     help = 'Process Fortigate configuration and populate Normalized Model Objects'
@@ -329,6 +330,11 @@ class Command(BaseCommand):
                 else:
                     serviceobjdict = {}
 
+                if 'firewall service group' in configdict['vdom'][vdom]:
+                    servicegroupdict = configdict['vdom'][vdom]['firewall service group']
+                else:
+                    servicegroupdict = {}
+
                 if 'firewall policy' in configdict['vdom'][vdom]:
                     policydict = configdict['vdom'][vdom]['firewall policy']
                 else:
@@ -337,6 +343,7 @@ class Command(BaseCommand):
                 populate_addressobjs(device, addressobjdict, options)
                 populate_addrgrpobjects(device, addrgrpdict, options)
                 populate_serviceobjects(device, serviceobjdict, options)
+                populate_servicegroupobjects(device, servicegroupdict, options)
                 print("\nStatistics for VDOM: %s" % vdom)
                 print("Total Address Objects: %d" % len(list(addressobjdict.keys())))
                 print("Total Address Group Objects: %d" % len(list(addrgrpdict.keys())))

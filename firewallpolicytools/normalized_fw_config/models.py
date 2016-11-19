@@ -15,6 +15,9 @@ class Device(models.Model):
     hostname = models.CharField(max_length=128)
     vsys = models.CharField(max_length=64, null=True, default=None)
 
+    def __str__(self):
+        return self.hostname + " [" + self.vsys +"]"
+
 class ConfigVersion(models.Model):
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
     current_active = models.BooleanField(default=False)
@@ -200,6 +203,17 @@ class ServiceObject(models.Model):
     configs = models.ManyToManyField(ConfigVersion)
     device = models.ForeignKey(Device)
 
+    def __str__(self):
+        return self.name
+
+class CompoundServiceObject(models.Model):
+    name = models.CharField(max_length=64)
+    members = models.ManyToManyField(ServiceObject)
+    configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+
+    def __str__(self):
+        return self.name
 
 class AddressGroup(models.Model):
     name = models.CharField(max_length=64)
@@ -207,13 +221,17 @@ class AddressGroup(models.Model):
     configs = models.ManyToManyField(ConfigVersion)
     device = models.ForeignKey(Device)
 
+    def __str__(self):
+        return self.name
 
 class ServiceGroup(models.Model):
     name = models.CharField(max_length=64)
-    members = models.ManyToManyField(ServiceObject)
-    configs = models.ManyToManyField(ConfigVersion)
+    members = models.ManyToManyField(CompoundServiceObject)
     device = models.ForeignKey(Device)
-    compoundservice = models.BooleanField(default=False)
+    configs = models.ManyToManyField(ConfigVersion)
+
+    def __str__(self):
+        return self.name
 
 class Interface(models.Model):
     name = models.CharField(max_length=128)
@@ -221,6 +239,8 @@ class Interface(models.Model):
     configs = models.ManyToManyField(ConfigVersion)
     device = models.ForeignKey(Device)
 
+    def __str__(self):
+        return self.name
 
 class ZoneObject(models.Model):
     # An interface can be treated as a zone
@@ -230,6 +250,8 @@ class ZoneObject(models.Model):
     configs = models.ManyToManyField(ConfigVersion)
     device = models.ForeignKey(Device)
 
+    def __str__(self):
+        return self.name
 
 class Policy(models.Model):
     ACTION_CHOICES = (
@@ -237,6 +259,7 @@ class Policy(models.Model):
         ('deny', "Deny traffic silently (Drop)"),
         ('reject', "Deny Traffic with and notify sender (TCP RST or ICMP Unreachable)")
     )
+    name = models.CharField(max_length=128, null=True, default=None)
     policyid = models.IntegerField(default=0)
     sequence = models.IntegerField(default=0)
     source = models.ManyToManyField(AddressObject, related_name='src_object')
@@ -247,3 +270,8 @@ class Policy(models.Model):
     configs = models.ManyToManyField(ConfigVersion)
     device = models.ForeignKey(Device)
     action = models.CharField(max_length=6, choices=ACTION_CHOICES)
+
+    def __str__(self):
+        if self.name:
+            return self.policyid + ': ' + self.name
+        return self.policyid
