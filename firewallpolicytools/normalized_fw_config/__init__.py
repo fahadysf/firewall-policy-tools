@@ -1,0 +1,1 @@
+default_app_config = 'normalized_fw_config.apps.NormalizedFWConfConfig'

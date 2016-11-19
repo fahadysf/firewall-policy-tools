@@ -2,7 +2,7 @@ from django.db import models
 
 # Create your models here.
 class RawConfigFile(models.Model):
-    config_text = models.TextField()
+    configstr = models.TextField()
     name = models.CharField(max_length=300)
     import_date = models.DateTimeField('Import Timestamp', auto_now=True)
 
@@ -19,6 +19,7 @@ class ConfigVersion(models.Model):
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
     current_active = models.BooleanField(default=False)
     date = models.DateTimeField(auto_now=True)
+    rawfile = models.ForeignKey(RawConfigFile, null=True, default=None)
 
 class AddressObject(models.Model):
     TYPE_CHOICES = (
@@ -32,12 +33,16 @@ class AddressObject(models.Model):
     )
     type = models.CharField(max_length=6, choices=TYPE_CHOICES)
     name = models.CharField(max_length=64)
-    start_ip = models.GenericIPAddressField()
+    start_ip = models.GenericIPAddressField(null=True)
     end_ip = models.GenericIPAddressField(null=True)
-    netmask = models.IntegerField(null=True, default=None)
+    prefixlen = models.IntegerField(null=True, default=None)
     fqdn = models.CharField(max_length=256, null=True, default=None)
     description = models.CharField(max_length=512, null=True, default=None)
     configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+
+    def __str__(self):
+        return self.name
 
 class ServiceObject(models.Model):
     PROTO_CHOICES = (
@@ -180,19 +185,42 @@ class ServiceObject(models.Model):
         (141, 'WESP'),
         (142, 'ROHC'),
         (256, 'TCP+UDP'),
+        (257, 'TCP+UDP+SCTP'), #  This is the default for FortiGate Devices
     )
-    protocol = models.IntegerField(choices=PROTO_CHOICES, default=None),
+    name = models.CharField(max_length=128)
+    protocol = models.IntegerField(choices=PROTO_CHOICES, default=256),
     # This substitutes as ICMP type for ICMP protocol
-    start_port = models.IntegerField()
+    start_port = models.IntegerField(null=True,default=None)
     end_port = models.IntegerField(null=True, default=None)
+    src_start_port = models.IntegerField(null=True, default=None)
+    src_end_port = models.IntegerField(null=True, default=None)
     # Only valid for ICMP
     icmp_code = models.IntegerField(null=True, default=None)
-    description = models.CharField(max_length=512, null=True, default=None)
+    description = models.CharField(max_length=512, default='')
+    configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+
+
+class AddressGroup(models.Model):
+    name = models.CharField(max_length=64)
+    members = models.ManyToManyField(AddressObject)
+    configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+
+
+class ServiceGroup(models.Model):
+    name = models.CharField(max_length=64)
+    members = models.ManyToManyField(ServiceObject)
+    configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+    compoundservice = models.BooleanField(default=False)
 
 class Interface(models.Model):
     name = models.CharField(max_length=128)
     description = models.CharField(max_length=512, null=True, default=None)
     configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+
 
 class ZoneObject(models.Model):
     # An interface can be treated as a zone
@@ -200,6 +228,8 @@ class ZoneObject(models.Model):
     members = models.ManyToManyField(Interface)
     description = models.CharField(max_length=512, null=True, default=None)
     configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
+
 
 class Policy(models.Model):
     ACTION_CHOICES = (
@@ -215,4 +245,5 @@ class Policy(models.Model):
     dstzone = models.ManyToManyField(ZoneObject, related_name='dst_zone')
     services = models.ManyToManyField(ServiceObject)
     configs = models.ManyToManyField(ConfigVersion)
+    device = models.ForeignKey(Device)
     action = models.CharField(max_length=6, choices=ACTION_CHOICES)
