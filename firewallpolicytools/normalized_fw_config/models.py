@@ -253,6 +253,20 @@ class ZoneObject(models.Model):
     def __str__(self):
         return self.name
 
+class PolicyAddrSet(models.Model):
+    addresses = models.ManyToManyField(AddressObject)
+    addressgroups = models.ManyToManyField(AddressGroup)
+
+class PolicyZoneSet(models.Model):
+    zones = models.ManyToManyField(ZoneObject)
+    interfaces = models.ManyToManyField(Interface)
+
+class PolicyServiceSet(models.Model):
+    services = models.ManyToManyField(ServiceObject)
+    compoundservices = models.ManyToManyField(CompoundServiceObject)
+    servicegroups = models.ManyToManyField(ServiceGroup)
+
+
 class Policy(models.Model):
     ACTION_CHOICES = (
         ('permit', "Allow traffic to pass"),
@@ -262,16 +276,16 @@ class Policy(models.Model):
     name = models.CharField(max_length=128, null=True, default=None)
     policyid = models.IntegerField(default=0)
     sequence = models.IntegerField(default=0)
-    source = models.ManyToManyField(AddressObject, related_name='src_object')
-    destination = models.ManyToManyField(AddressObject, related_name='dst_object')
-    srczone = models.ManyToManyField(ZoneObject, related_name='src_zone')
-    dstzone = models.ManyToManyField(ZoneObject, related_name='dst_zone')
-    services = models.ManyToManyField(ServiceObject)
+    source = models.ForeignKey(PolicyAddrSet, related_name='src_addr_set', null=True)
+    destination = models.ForeignKey(PolicyAddrSet, related_name='dst_addr_set', null=True)
+    srczone = models.ForeignKey(PolicyZoneSet, related_name='src_zone_set', null=True)
+    dstzone = models.ForeignKey(PolicyZoneSet, related_name='dst_zone_set', null=True)
+    services = models.ForeignKey(PolicyServiceSet, null=True)
     configs = models.ManyToManyField(ConfigVersion)
     device = models.ForeignKey(Device)
     action = models.CharField(max_length=6, choices=ACTION_CHOICES)
 
     def __str__(self):
         if self.name:
-            return self.policyid + ': ' + self.name
-        return self.policyid
+            return str(self.policyid) + ': ' + self.name
+        return str(self.policyid)

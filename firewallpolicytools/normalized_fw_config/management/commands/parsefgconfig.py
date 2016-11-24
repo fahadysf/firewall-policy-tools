@@ -12,18 +12,12 @@ import datetime
 import ipaddress
 import ntpath
 import json
+from itertools import chain
+from firewallpolicytools import settings
+from django.db.models import Count
 
 from django.core.management.base import BaseCommand, CommandError
-from normalized_fw_config.models import AddressObject, \
-    Device, \
-    Policy, \
-    CompoundServiceObject, \
-    RawConfigFile, \
-    ConfigVersion, \
-    AddressGroup, \
-    ServiceObject, \
-    ServiceGroup
-
+from normalized_fw_config.models import *
 pp = pprint.PrettyPrinter(indent=2)
 
 def pprintobj(objname, obj):
@@ -31,10 +25,10 @@ def pprintobj(objname, obj):
     pp.pprint(obj)
 
 def populate_addressobjs(dev, addressobjdict, options):
+    """
+    Create the Address Objects
+    """
     for objname in addressobjdict.keys():
-        """
-        Create the Address Objects
-        """
         addressobj, created = AddressObject.objects.get_or_create(name=objname, device=dev)
         obj = addressobjdict[objname]
         addressobj.name = objname
@@ -99,14 +93,13 @@ def populate_addrgrpobjects(dev, addrgrpdict, options):
             addrgrpobject.delete()
 
 def populate_serviceobjects(dev, serviceobjdict, options):
+    """
+    Create the Service Objects
+    By default FortiGate Service Objects are UDP+TCP+SCTP with multiple port-ranges per protocol included
+    We can check if the service is having multiple ranges with different protocols and create a Compound Service
+    Group
+    """
     for objname in serviceobjdict.keys():
-        """
-        Create the Service Objects
-        """
-        # By default FortiGate Service Objects are UDP+TCP+SCTP with multiple port-ranges per protocol included
-        # We can check if the service is having multiple ranges with different protocols and create a Compound Service
-        # Group
-
         obj = serviceobjdict[objname]
         objkeys = list(obj.keys())
 
@@ -227,6 +220,193 @@ def populate_servicegroupobjects(dev, servicegroupdict, options):
             print("Object not saved")
             servicegroupobject.delete()
 
+def populate_zoneobjects(dev, zoneobjdict, options):
+    """
+    Create the Zone Objects
+    !!NEEDS WORK
+    """
+    if zoneobjdict == {}:
+        return
+
+    for objname in zoneobjdict.keys():
+        obj = zoneobjdict[objname]
+        objkeys = list(obj.keys())
+
+def populate_interfaces(dev, interfacedict, options):
+    """
+    Create the Interface objects
+
+    :param dev:
+    :param interfacedict:
+    :param options:
+    :return:
+    """
+    for objname in interfacedict.keys():
+        obj = interfacedict[objname]
+        if obj['vdom'] == dev.vsys:
+            interfaceobj, created = Interface.objects.get_or_create(name=objname, device=dev)
+            interfaceobj.name = objname
+            interfaceobj.device = dev
+            interfaceobj.save()
+
+def populate_policies(dev, policydict, options):
+    """
+    Create the Policy objects
+
+    :param dev:
+    :param policydict:
+    :param options:
+    :return:
+    """
+    sequence = 0
+    for objid in policydict.keys():
+        sequence += 1
+        obj = policydict[objid]
+        policyobj, created = Policy.objects.get_or_create(policyid=objid, device=dev)
+        policyobj.policyid = int(objid)
+        policyobj.device = dev
+        policyobj.sequence = sequence
+        # Build the source AddressSet
+        for key in obj:
+            if '" "' in obj[key]:
+                obj[key] = (obj[key]).split('" "')
+            else:
+                obj[key] = [obj[key]]
+            if key == 'srcaddr' or key=='dstaddr':
+                addrlist = []
+                addrgrplist = []
+                for i in obj[key]:
+                    try:
+                        ao = AddressObject.objects.get(name=i, device=dev)
+                        addrlist.append(ao)
+                    except:
+                        try:
+                            ago = AddressGroup.objects.get(name=i, device=dev)
+                            addrgrplist.append(ago)
+                        except:
+                            pass
+                try:
+                    paddrsetqs = PolicyAddrSet.objects.annotate(addrcount=Count('addresses'),
+                        addrgrpcount=Count('addressgroups')).filter(addrcount=len(addrlist),
+                                                                    addrgrpcount=len(addrgrplist))
+                    if len(paddrsetqs) > 0:
+                        for ao in addrlist:
+                            paddrsetqs = paddrsetqs.filter(addresses=ao)
+                        for ago in addrgrplist:
+                            paddrsetqs = paddrsetqs.filter(addressgroups=ago)
+                    if len(paddrsetqs) == 1:
+                        paddrset = paddrsetqs[0]
+                    else:
+                        paddrset = PolicyAddrSet()
+                        paddrset.save()
+                        for ao in addrlist:
+                            paddrset.addresses.add(ao)
+                        for ago in addrgrplist:
+                            paddrset.addressgroups.add(ago)
+                        paddrset.save()
+                except:
+                    raise
+                if len(paddrset.addresses.all()) + len(paddrset.addressgroups.all()) > 0:
+                    paddrset.save()
+                    if key == 'srcaddr':
+                        srcpaddrset = paddrset
+                        policyobj.source = srcpaddrset
+                    elif key == 'dstaddr':
+                        dstpaddrset = paddrset
+                        policyobj.destination = dstpaddrset
+
+            elif key == 'srcintf' or key=='dstintf':
+                intflist = []
+                zonelist = []
+                for i in obj[key]:
+                    try:
+                        intf = Interface.objects.get(name=i, device=dev)
+                        intflist.append(intf)
+                    except:
+                        try:
+                            zone = ZoneObject.objects.get(name=i, device=dev)
+                            zonelist.append(zone)
+                        except:
+                            pass
+                try:
+                    pzonesetqs = PolicyZoneSet.objects.annotate(intfcount=Count('interfaces'),
+                                                                zonecount=Count('zones')).filter(
+                        intfcount=len(intflist),
+                        zonecount=len(zonelist))
+                    if len(pzonesetqs) > 0:
+                        for intf in intflist:
+                            pzonesetqs = pzonesetqs.filter(interfaces=intf)
+                        for zone in zonelist:
+                            pzonesetqs = pzonesetqs.filter(zones=zone)
+                    if len(pzonesetqs) == 1:
+                        pzoneset = pzonesetqs[0]
+                    else:
+                        pzoneset = PolicyZoneSet()
+                        pzoneset.save()
+                        for intf in intflist:
+                            pzoneset.interfaces.add(intf)
+                        for zone in zonelist:
+                            pzoneset.zones.add(zone)
+                        pzoneset.save()
+                except:
+                    raise
+                if len(pzoneset.zones.all()) + len(pzoneset.interfaces.all()) > 0:
+                    pzoneset.save()
+                    if key == 'srcintf':
+                        srcpzoneset = pzoneset
+                        policyobj.srczone = srcpzoneset
+                    elif key == 'dstintf':
+                        dstpzoneset = pzoneset
+                        policyobj.dstzone = dstpzoneset
+
+            elif key == 'service':
+                compoundservicelist = []
+                servicegrplist = []
+                for i in obj[key]:
+                    try:
+                        so = CompoundServiceObject.objects.get(name=i, device=dev)
+                        compoundservicelist.append(so)
+                    except:
+                        try:
+                            sgo = ServiceGroup.objects.get(name=i, device=dev)
+                            servicegrplist.append(sgo)
+                        except:
+                            pass
+                try:
+                    pservicesetqs = PolicyServiceSet.objects.annotate(servicecount=Count('compoundservices'),
+                        servicegrpcount=Count('servicegroups')).filter(servicecount=len(compoundservicelist),
+                                                                    servicegrpcount=len(servicegrplist))
+                    if len(pservicesetqs) > 0:
+                        for so in compoundservicelist:
+                            pservicesetqs = pservicesetqs.filter(compoundservices=so)
+                        for sgo in servicegrplist:
+                            pservicesetqs = pservicesetqs.filter(servicegroups=sgo)
+                    if len(pservicesetqs) == 1:
+                        pserviceset = pservicesetqs[0]
+                    else:
+                        pserviceset = PolicyServiceSet()
+                        pserviceset.save()
+                        for so in compoundservicelist:
+                            pserviceset.compoundservices.add(so)
+                        for sgo in servicegrplist:
+                            pserviceset.servicegroups.add(sgo)
+                        pserviceset.save()
+                except:
+                    raise
+                if len(pserviceset.compoundservices.all()) + len(pserviceset.servicegroups.all()) > 0:
+                    pserviceset.save()
+                    policyobj.services = pserviceset
+
+            policyobj.device = dev
+            # FG policies write 'permit' as 'accept'
+            if obj['action'] == ['accept'] or obj['action'] == 'accept':
+                policyobj.action = 'permit'
+            else:
+                policyobj.action = 'deny'
+                print(obj)
+                input()
+            policyobj.save()
+
 class Command(BaseCommand):
     help = 'Process Fortigate configuration and populate Normalized Model Objects'
     def add_arguments(self, parser):
@@ -240,6 +420,25 @@ class Command(BaseCommand):
                             required=False,
                             default='n'
                             )
+
+    def init_discovery(self,
+                       device,
+                       options,
+                       addressobjdict,
+                       addrgrpdict,
+                       serviceobjdict,
+                       servicegroupdict,
+                       zoneobjdict,
+                       interfacedict,
+                       policydict):
+
+        populate_addressobjs(device, addressobjdict, options)
+        populate_addrgrpobjects(device, addrgrpdict, options)
+        populate_serviceobjects(device, serviceobjdict, options)
+        populate_servicegroupobjects(device, servicegroupdict, options)
+        populate_zoneobjects(device, zoneobjdict, options)
+        populate_interfaces(device, interfacedict, options)
+        populate_policies(device, policydict, options)
 
     def handle(self, *args, **options):
         CONFIGFILE = options['f']
@@ -302,6 +501,17 @@ class Command(BaseCommand):
                 if action == 'end' or action == 'next':
                     elementstack.pop()
 
+        if settings.DEBUG:
+            configjson = open('config.json', 'w')
+            configjson.write(json.dumps(configdict, sort_keys=True, indent=2, separators=(',', ': ')))
+            configjson.close()
+
+        if 'system interface' in configdict['global']:
+            interfacedict = configdict['global']['system interface']
+            #print(json.dumps(interfacedict, sort_keys=True, indent=2, separators=(',', ': ')))
+            #
+        else:
+            interfacedict = {}
 
         # Create one Device Object and ConfigSet for each VDOM
         if 'vdom' in configdict:
@@ -340,10 +550,13 @@ class Command(BaseCommand):
                 else:
                     policydict = {}
 
-                populate_addressobjs(device, addressobjdict, options)
-                populate_addrgrpobjects(device, addrgrpdict, options)
-                populate_serviceobjects(device, serviceobjdict, options)
-                populate_servicegroupobjects(device, servicegroupdict, options)
+                if 'firewall zone' in configdict['vdom'][vdom]:
+                    zoneobjdict = configdict['vdom'][vdom]['firewall zone']
+                else:
+                    zoneobjdict = {}
+
+                self.init_discovery(device,options,addressobjdict,addrgrpdict,serviceobjdict,servicegroupdict,
+                                    zoneobjdict, interfacedict, policydict)
                 print("\nStatistics for VDOM: %s" % vdom)
                 print("Total Address Objects: %d" % len(list(addressobjdict.keys())))
                 print("Total Address Group Objects: %d" % len(list(addrgrpdict.keys())))
@@ -356,8 +569,14 @@ class Command(BaseCommand):
             if options['d'] == 'n':
                 device.save()
             addressobjdict = configdict['firewall address']
-            populate_addressobjs(device, addressobjdict, options)
-            populate_addrgrpobjects(device, addrgrpdict, options)
+            addrgrpdict = configdict['firewall addrgrp']
+            serviceobjdict = configdict['firewall service custom']
+            servicegroupdict = configdict['firewall service group']
+            policydict = configdict['firewall policy']
+            zoneobjdict = configdict['firewall zone']
+            interfacedict = configdict['system interface']
+            self.init_discovery(device, options, addressobjdict, addrgrpdict, serviceobjdict, servicegroupdict,
+                                zoneobjdict, interfacedict, policydict)
 
         # Create the current configversion object
 
