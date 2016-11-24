@@ -191,7 +191,7 @@ class ServiceObject(models.Model):
         (257, 'TCP+UDP+SCTP'), #  This is the default for FortiGate Devices
     )
     name = models.CharField(max_length=128)
-    protocol = models.IntegerField(choices=PROTO_CHOICES, default=256),
+    protocol = models.IntegerField(choices=PROTO_CHOICES, default=256)
     # This substitutes as ICMP type for ICMP protocol
     start_port = models.IntegerField(null=True,default=None)
     end_port = models.IntegerField(null=True, default=None)
