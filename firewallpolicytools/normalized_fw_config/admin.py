@@ -93,8 +93,10 @@ class PolicyAddrSetAdmin(admin.ModelAdmin):
 @admin.register(PolicyServiceSet)
 class PolicyServiceSetAdmin(admin.ModelAdmin):
     fields = ('services','servicegroups')
-    list_display = ('servicelist', 'servicegrouplist')
+    list_display = ('compoundservicelist','servicelist', 'servicegrouplist')
 
+    def compoundservicelist(self, obj):
+        return ", ".join([z.name for z in obj.compoundservices.all()])
 
     def servicelist(self, obj):
         return ", ".join([z.name for z in obj.services.all()])
